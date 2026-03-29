@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class UrlService {
     public static final String CLICK_COUNT_PREFIX = "url:click:";
+    public static final String NULL_VALUE = "NOT_FOUND";
 
     private final UrlMappingRepository repository;
     private final SnowflakeIdGenerator idGenerator;
@@ -50,6 +51,9 @@ public class UrlService {
 
                     repository.save(urlMappingPO);
 
+                    // Evict potential NULL cache before putting new value
+                    evictFromCaches(shortCode);
+
                     // Pre-warm cache
                     putInCaches(shortCode, longUrl);
 
@@ -63,6 +67,7 @@ public class UrlService {
         if (l1Cache != null) {
             String l1Val = l1Cache.get(shortCode, String.class);
             if (l1Val != null) {
+                if (NULL_VALUE.equals(l1Val)) return Optional.empty();
                 incrementClickCount(shortCode);
                 return Optional.of(l1Val);
             }
@@ -73,6 +78,10 @@ public class UrlService {
         if (l2Cache != null) {
             String l2Val = l2Cache.get(shortCode, String.class);
             if (l2Val != null) {
+                if (NULL_VALUE.equals(l2Val)) {
+                    if (l1Cache != null) l1Cache.put(shortCode, NULL_VALUE);
+                    return Optional.empty();
+                }
                 // Secondary backfill to L1
                 if (l1Cache != null) l1Cache.put(shortCode, l2Val);
                 incrementClickCount(shortCode);
@@ -88,19 +97,24 @@ public class UrlService {
                 if (l1Cache != null) {
                     String val = l1Cache.get(shortCode, String.class);
                     if (val != null) {
+                        if (NULL_VALUE.equals(val)) return Optional.empty();
                         incrementClickCount(shortCode);
                         return Optional.of(val);
                     }
                 }
 
-                return repository.findByShortCode(shortCode)
-                        .map(urlMappingPO -> {
-                            String longUrl = urlMappingPO.getLongUrl();
-                            // Backfill caches
-                            putInCaches(shortCode, longUrl);
-                            incrementClickCount(shortCode);
-                            return longUrl;
-                        });
+                Optional<UrlMappingPO> result = repository.findByShortCode(shortCode);
+                if (result.isPresent()) {
+                    UrlMappingPO mapping = result.get();
+                    String longUrl = mapping.getLongUrl();
+                    putInCaches(shortCode, longUrl);
+                    incrementClickCount(shortCode);
+                    return Optional.of(longUrl);
+                } else {
+                    // Cache the absence of this URL to prevent penetration
+                    putInCaches(shortCode, NULL_VALUE);
+                    return Optional.empty();
+                }
             } finally {
                 locks.remove(shortCode);
             }
@@ -117,5 +131,12 @@ public class UrlService {
         Cache l2 = l2CacheManager.getCache(CacheConfig.L2_CACHE_NAME);
         if (l1 != null) l1.put(shortCode, longUrl);
         if (l2 != null) l2.put(shortCode, longUrl);
+    }
+
+    private void evictFromCaches(String shortCode) {
+        Cache l1 = l1CacheManager.getCache(CacheConfig.L1_CACHE_NAME);
+        Cache l2 = l2CacheManager.getCache(CacheConfig.L2_CACHE_NAME);
+        if (l1 != null) l1.evict(shortCode);
+        if (l2 != null) l2.evict(shortCode);
     }
 }
