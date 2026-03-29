@@ -1,7 +1,8 @@
 package com.example.shorturl.service;
 
-import com.example.shorturl.model.UrlMapping;
+import com.example.shorturl.model.UrlMappingPO;
 import com.example.shorturl.repository.UrlMappingRepository;
+import com.example.shorturl.util.Base62;
 import com.example.shorturl.util.SnowflakeIdGenerator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -18,12 +19,12 @@ public class UrlService {
     public String shortenUrl(String longUrl) {
         // Simple strategy: check if longUrl already exists
         return repository.findByLongUrl(longUrl)
-                .map(UrlMapping::getShortCode)
+                .map(UrlMappingPO::getShortCode)
                 .orElseGet(() -> {
                     long id = idGenerator.nextId();
                     String shortCode = Base62.encode(id);
 
-                    UrlMapping mapping = UrlMapping.builder()
+                    UrlMappingPO urlMappingPO = UrlMappingPO.builder()
                             .id(id)
                             .shortCode(shortCode)
                             .longUrl(longUrl)
@@ -32,18 +33,18 @@ public class UrlService {
                             .clickCount(0)
                             .build();
 
-                    repository.save(mapping);
+                    repository.save(urlMappingPO);
                     return shortCode;
                 });
     }
 
     public Optional<String> getLongUrl(String shortCode) {
         return repository.findByShortCode(shortCode)
-                .map(mapping -> {
+                .map(urlMappingPO -> {
                     // Update click count (Async in production)
-                    mapping.setClickCount(mapping.getClickCount() + 1);
-                    repository.save(mapping);
-                    return mapping.getLongUrl();
+                    urlMappingPO.setClickCount(urlMappingPO.getClickCount() + 1);
+                    repository.save(urlMappingPO);
+                    return urlMappingPO.getLongUrl();
                 });
     }
 }

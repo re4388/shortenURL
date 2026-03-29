@@ -12,7 +12,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @NoArgsConstructor
 @AllArgsConstructor
 @Document(collection = "worker_registry")
-public class WorkerNode {
+public class WorkerNodePO {
     @Id
     private String id; // Use POD_NAME or internal UUID
     private long workerId;

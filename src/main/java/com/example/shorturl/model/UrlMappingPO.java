@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Document(collection = "url_mappings")
-public class UrlMapping {
+public class UrlMappingPO {
     @Id
     private Long id;
 

@@ -1,6 +1,6 @@
 package com.example.shorturl.config;
 
-import com.example.shorturl.model.WorkerNode;
+import com.example.shorturl.model.WorkerNodePO;
 import com.example.shorturl.util.SnowflakeIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,9 +40,10 @@ public class SnowflakeConfig {
             hostIdentifier = UUID.randomUUID().toString();
         }
 
-        WorkerNode existingNode = mongoTemplate.findOne(
+        WorkerNodePO existingNode = mongoTemplate.findOne(
                 Query.query(Criteria.where("hostname").is(hostIdentifier)),
-                WorkerNode.class);
+                WorkerNodePO.class
+        );
 
         if (existingNode != null) {
             return existingNode.getWorkerId();
@@ -50,8 +51,8 @@ public class SnowflakeConfig {
 
         // Assign next available workerId (simple sequential search for example)
         for (long i = 0; i <= MAX_WORKER_ID; i++) {
-            if (!mongoTemplate.exists(Query.query(Criteria.where("workerId").is(i)), WorkerNode.class)) {
-                WorkerNode newNode = WorkerNode.builder()
+            if (!mongoTemplate.exists(Query.query(Criteria.where("workerId").is(i)), WorkerNodePO.class)) {
+                WorkerNodePO newNode = WorkerNodePO.builder()
                         .workerId(i)
                         .hostname(hostIdentifier)
                         .build();

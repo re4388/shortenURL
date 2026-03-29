@@ -2,7 +2,8 @@
 
 ## Overview
 
-A lightweight URL shortening microservice built with Spring Boot 3.2 and MongoDB. The service provides a REST API to shorten long URLs into compact, Base62-encoded short codes, and redirects short codes back to their original long URLs.
+- A lightweight URL shortening microservice built with Spring Boot 3.2 and MongoDB. 
+- The service provides a REST API to shorten long URLs into compact, Base62-encoded short codes, and redirects short codes back to their original long URLs.
 
 ---
 

@@ -1,7 +1,6 @@
 package com.example.shorturl.util;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 
 @Slf4j
 public class SnowflakeIdGenerator {
@@ -30,16 +29,16 @@ public class SnowflakeIdGenerator {
     }
 
     public synchronized long nextId() {
-        long timestamp = timeGen();
+        long now = genCurrentTime();
 
         // Clock skew check
-        if (timestamp < lastTimestamp) {
-            long offset = lastTimestamp - timestamp;
+        if (now < lastTimestamp) {
+            long offset = lastTimestamp - now;
             if (offset <= 5) {
                 try {
                     wait(offset << 1);
-                    timestamp = timeGen();
-                    if (timestamp < lastTimestamp) {
+                    now = genCurrentTime();
+                    if (now < lastTimestamp) {
                         throw new RuntimeException("Clock moved backwards. Refusing to generate ID for " + offset + "ms");
                     }
                 } catch (InterruptedException e) {
@@ -51,32 +50,33 @@ public class SnowflakeIdGenerator {
             }
         }
 
-        if (lastTimestamp == timestamp) {
+        if (lastTimestamp == now) {
             sequence = (sequence + 1) & maxSequence;
             if (sequence == 0) {
                 // Sequence overflow, spin until next millisecond
-                timestamp = tilNextMillis(lastTimestamp);
+                now = spinUntilNextMs(lastTimestamp);
             }
         } else {
             sequence = 0L;
         }
 
-        lastTimestamp = timestamp;
+        lastTimestamp = now;
 
-        return ((timestamp - EPOCH) << timestampLeftShift) |
+        return ((now - EPOCH) << timestampLeftShift) |
                (workerId << workerIdShift) |
                sequence;
     }
 
-    private long tilNextMillis(long lastTimestamp) {
-        long timestamp = timeGen();
-        while (timestamp <= lastTimestamp) {
-            timestamp = timeGen();
+    private long spinUntilNextMs(long lastTimestamp) {
+        long now = genCurrentTime();
+        while (now <= lastTimestamp) {
+            now = genCurrentTime();
         }
-        return timestamp;
+
+        return now;
     }
 
-    private long timeGen() {
+    private long genCurrentTime() {
         return System.currentTimeMillis();
     }
 }
