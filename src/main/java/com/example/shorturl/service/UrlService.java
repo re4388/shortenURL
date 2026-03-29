@@ -1,7 +1,9 @@
 package com.example.shorturl.service;
 
 import com.example.shorturl.config.CacheConfig;
+import com.example.shorturl.model.DailyStatsPO;
 import com.example.shorturl.model.UrlMappingPO;
+import com.example.shorturl.repository.DailyStatsRepository;
 import com.example.shorturl.repository.UrlMappingRepository;
 import com.example.shorturl.util.Base62;
 import com.example.shorturl.util.SnowflakeIdGenerator;
@@ -12,9 +14,13 @@ import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -24,6 +30,7 @@ public class UrlService {
     public static final String NULL_VALUE = "NOT_FOUND";
 
     private final UrlMappingRepository repository;
+    private final DailyStatsRepository dailyStatsRepository;
     private final SnowflakeIdGenerator idGenerator;
     private final CacheManager l1CacheManager;
     private final CacheManager l2CacheManager;
@@ -31,6 +38,17 @@ public class UrlService {
 
     // Local locks to prevent cache stampede for the same shortCode on this instance
     private final ConcurrentHashMap<String, Object> locks = new ConcurrentHashMap<>();
+
+    public Map<LocalDate, Long> getDailyStats(String shortCode, int days) {
+        LocalDate end = LocalDate.now();
+        LocalDate start = end.minusDays(days - 1);
+
+        List<DailyStatsPO> stats = dailyStatsRepository.findByShortCodeAndDateBetweenOrderByDateAsc(shortCode, start, end);
+
+        // Map to response format
+        return stats.stream()
+                .collect(Collectors.toMap(DailyStatsPO::getDate, DailyStatsPO::getClickCount));
+    }
 
     public String shortenUrl(String longUrl) {
         // Simple strategy: check if longUrl already exists

@@ -1,5 +1,6 @@
 package com.example.shorturl.service;
 
+import com.example.shorturl.model.DailyStatsPO;
 import com.example.shorturl.model.UrlMappingPO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +16,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,8 +40,10 @@ public class BatchClickCountService {
                 .build();
 
         List<String> keysToDelete = new ArrayList<>();
-        BulkOperations bulkOps = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, UrlMappingPO.class);
+        BulkOperations totalBulkOps = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, UrlMappingPO.class);
+        BulkOperations dailyBulkOps = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, DailyStatsPO.class);
         boolean hasOperations = false;
+        LocalDate today = LocalDate.now();
 
         try (Cursor<String> cursor = redisTemplate.scan(options)) {
             while (cursor.hasNext()) {
@@ -50,10 +54,15 @@ public class BatchClickCountService {
                     long count = Long.parseLong(countStr);
                     String shortCode = key.substring(UrlService.CLICK_COUNT_PREFIX.length());
 
-                    // Prepare MongoDB atomic increment
-                    Query query = Query.query(Criteria.where("shortCode").is(shortCode));
-                    Update update = new Update().inc("clickCount", count);
-                    bulkOps.updateOne(query, update);
+                    // 1. Update Total Mapping
+                    Query totalQuery = Query.query(Criteria.where("shortCode").is(shortCode));
+                    Update totalUpdate = new Update().inc("clickCount", count);
+                    totalBulkOps.updateOne(totalQuery, totalUpdate);
+
+                    // 2. Update Daily Stats (Upsert per day)
+                    Query dailyQuery = Query.query(Criteria.where("shortCode").is(shortCode).and("date").is(today));
+                    Update dailyUpdate = new Update().inc("clickCount", count);
+                    dailyBulkOps.upsert(dailyQuery, dailyUpdate);
 
                     keysToDelete.add(key);
                     hasOperations = true;
@@ -65,12 +74,11 @@ public class BatchClickCountService {
 
         if (hasOperations) {
             try {
-                // 1. Execute Bulk Update in MongoDB
-                bulkOps.execute();
+                // Execute both bulk operations
+                totalBulkOps.execute();
+                dailyBulkOps.execute();
 
-                // 2. Delete keys from Redis only after successful DB update
-                // Note: There's a tiny window for double-counting if delete fails,
-                // but it's acceptable for click counts.
+                // Delete keys from Redis only after successful DB update
                 redisTemplate.delete(keysToDelete);
 
                 log.info("Successfully synced {} shortCodes click counts to MongoDB", keysToDelete.size());

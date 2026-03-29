@@ -6,6 +6,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.view.RedirectView;
 
+import java.time.LocalDate;
+import java.util.Map;
+
 @RestController
 @RequiredArgsConstructor
 public class UrlController {
@@ -22,5 +25,12 @@ public class UrlController {
         return urlService.getLongUrl(shortCode)
                 .map(longUrl -> new RedirectView(longUrl, false)) // 302 Found
                 .orElseThrow(() -> new RuntimeException("URL not found"));
+    }
+
+    @GetMapping("/api/v1/urls/{shortCode}/stats")
+    public ResponseEntity<Map<LocalDate, Long>> getStats(
+            @PathVariable String shortCode,
+            @RequestParam(defaultValue = "7") int days) {
+        return ResponseEntity.ok(urlService.getDailyStats(shortCode, days));
     }
 }
