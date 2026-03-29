@@ -1,5 +1,6 @@
 package com.example.shorturl.controller;
 
+import com.example.shorturl.model.UrlCreateRequest;
 import com.example.shorturl.service.UrlService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -15,8 +16,11 @@ public class UrlController {
     private final UrlService urlService;
 
     @PostMapping("/api/v1/urls")
-    public ResponseEntity<String> create(@RequestBody String longUrl) {
-        String shortCode = urlService.shortenUrl(longUrl);
+    public ResponseEntity<String> create(@RequestBody UrlCreateRequest request) {
+        if (request.getLongUrl() == null || request.getLongUrl().isEmpty()) {
+            return ResponseEntity.badRequest().body("longUrl is required");
+        }
+        String shortCode = urlService.shortenUrl(request);
         return ResponseEntity.ok(shortCode);
     }
 

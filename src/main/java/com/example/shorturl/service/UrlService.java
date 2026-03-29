@@ -2,6 +2,7 @@ package com.example.shorturl.service;
 
 import com.example.shorturl.config.CacheConfig;
 import com.example.shorturl.model.DailyStatsPO;
+import com.example.shorturl.model.UrlCreateRequest;
 import com.example.shorturl.model.UrlMappingPO;
 import com.example.shorturl.repository.DailyStatsRepository;
 import com.example.shorturl.repository.UrlMappingRepository;
@@ -14,8 +15,10 @@ import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,6 +31,7 @@ import java.util.stream.Collectors;
 public class UrlService {
     public static final String CLICK_COUNT_PREFIX = "url:click:";
     public static final String NULL_VALUE = "NOT_FOUND";
+    private static final long MAX_TTL_DAYS = 365 * 2; // 2 years limit
 
     private final UrlMappingRepository repository;
     private final DailyStatsRepository dailyStatsRepository;
@@ -50,33 +54,64 @@ public class UrlService {
                 .collect(Collectors.toMap(DailyStatsPO::getDate, DailyStatsPO::getClickCount));
     }
 
-    public String shortenUrl(String longUrl) {
-        // Simple strategy: check if longUrl already exists
+    public String shortenUrl(UrlCreateRequest request) {
+        String longUrl = request.getLongUrl();
+        LocalDateTime expireAt = calculateExpiration(request);
+
+        // check if longUrl already exists
         return repository.findByLongUrl(longUrl)
-                .map(UrlMappingPO::getShortCode)
+                .map(mapping -> {
+                    // Update expiration if new one is provided (Strategy: Overwrite)
+                    mapping.setExpireAt(expireAt);
+                    repository.save(mapping);
+
+                    // Evict potential NULL cache
+                    evictFromCaches(mapping.getShortCode());
+                    // Pre-warm cache
+                    putInCaches(mapping.getShortCode(), longUrl);
+
+                    return mapping.getShortCode();
+                })
                 .orElseGet(() -> {
                     long id = idGenerator.nextId();
                     String shortCode = Base62.encode(id);
 
-                    UrlMappingPO urlMappingPO = UrlMappingPO.builder()
+                    UrlMappingPO mapping = UrlMappingPO.builder()
                             .id(id)
                             .shortCode(shortCode)
                             .longUrl(longUrl)
                             .createdAt(LocalDateTime.now())
-                            .expireAt(LocalDateTime.now().plusMonths(1)) // 1 month TTL
+                            .expireAt(expireAt)
                             .clickCount(0)
                             .build();
 
-                    repository.save(urlMappingPO);
-
-                    // Evict potential NULL cache before putting new value
+                    repository.save(mapping);
                     evictFromCaches(shortCode);
-
-                    // Pre-warm cache
                     putInCaches(shortCode, longUrl);
-
                     return shortCode;
                 });
+    }
+
+    private LocalDateTime calculateExpiration(UrlCreateRequest request) {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime maxLimit = now.plusDays(MAX_TTL_DAYS);
+        LocalDateTime expireAt;
+
+        if (request.getExpireAtTimestamp() != null) {
+            expireAt = LocalDateTime.ofInstant(Instant.ofEpochMilli(request.getExpireAtTimestamp()), ZoneId.systemDefault());
+        } else if (request.getTtlSeconds() != null) {
+            expireAt = now.plusSeconds(request.getTtlSeconds());
+        } else {
+            expireAt = now.plusMonths(1); // Default
+        }
+
+        // Enforce system maximum limit
+        return expireAt.isAfter(maxLimit) ? maxLimit : expireAt;
+    }
+
+    @Deprecated
+    public String shortenUrl(String longUrl) {
+        return shortenUrl(UrlCreateRequest.builder().longUrl(longUrl).build());
     }
 
     public Optional<String> getLongUrl(String shortCode) {
