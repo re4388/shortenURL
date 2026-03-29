@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -19,10 +20,13 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 @RequiredArgsConstructor
 public class UrlService {
+    public static final String CLICK_COUNT_PREFIX = "url:click:";
+
     private final UrlMappingRepository repository;
     private final SnowflakeIdGenerator idGenerator;
     private final CacheManager l1CacheManager;
     private final CacheManager l2CacheManager;
+    private final StringRedisTemplate redisTemplate;
 
     // Local locks to prevent cache stampede for the same shortCode on this instance
     private final ConcurrentHashMap<String, Object> locks = new ConcurrentHashMap<>();
@@ -58,7 +62,10 @@ public class UrlService {
         Cache l1Cache = l1CacheManager.getCache(CacheConfig.L1_CACHE_NAME);
         if (l1Cache != null) {
             String l1Val = l1Cache.get(shortCode, String.class);
-            if (l1Val != null) return Optional.of(l1Val);
+            if (l1Val != null) {
+                incrementClickCount(shortCode);
+                return Optional.of(l1Val);
+            }
         }
 
         // 2. Try L2 Cache (Redis)
@@ -68,6 +75,7 @@ public class UrlService {
             if (l2Val != null) {
                 // Secondary backfill to L1
                 if (l1Cache != null) l1Cache.put(shortCode, l2Val);
+                incrementClickCount(shortCode);
                 return Optional.of(l2Val);
             }
         }
@@ -79,7 +87,10 @@ public class UrlService {
                 // Double check after getting lock
                 if (l1Cache != null) {
                     String val = l1Cache.get(shortCode, String.class);
-                    if (val != null) return Optional.of(val);
+                    if (val != null) {
+                        incrementClickCount(shortCode);
+                        return Optional.of(val);
+                    }
                 }
 
                 return repository.findByShortCode(shortCode)
@@ -87,17 +98,18 @@ public class UrlService {
                             String longUrl = urlMappingPO.getLongUrl();
                             // Backfill caches
                             putInCaches(shortCode, longUrl);
-
-                            // Update click count (Still sync for now, will move to async/batch later)
-                            urlMappingPO.setClickCount(urlMappingPO.getClickCount() + 1);
-                            repository.save(urlMappingPO);
-
+                            incrementClickCount(shortCode);
                             return longUrl;
                         });
             } finally {
                 locks.remove(shortCode);
             }
         }
+    }
+
+    private void incrementClickCount(String shortCode) {
+        // Atomic increment in Redis (Asynchronous-style collection)
+        redisTemplate.opsForValue().increment(CLICK_COUNT_PREFIX + shortCode);
     }
 
     private void putInCaches(String shortCode, String longUrl) {
