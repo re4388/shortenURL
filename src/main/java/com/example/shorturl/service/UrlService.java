@@ -8,6 +8,7 @@ import com.example.shorturl.repository.DailyStatsRepository;
 import com.example.shorturl.repository.UrlMappingRepository;
 import com.example.shorturl.util.Base62;
 import com.example.shorturl.util.SnowflakeIdGenerator;
+import com.example.shorturl.util.UrlValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.Cache;
@@ -36,6 +37,7 @@ public class UrlService {
     private final UrlMappingRepository repository;
     private final DailyStatsRepository dailyStatsRepository;
     private final SnowflakeIdGenerator idGenerator;
+    private final BlacklistManager blacklistManager;
     private final CacheManager l1CacheManager;
     private final CacheManager l2CacheManager;
     private final StringRedisTemplate redisTemplate;
@@ -56,6 +58,13 @@ public class UrlService {
 
     public String shortenUrl(UrlCreateRequest request) {
         String longUrl = request.getLongUrl();
+
+        // 1. Blacklist & Self-referencing check
+        String host = UrlValidator.getNormalizedHost(longUrl);
+        if (blacklistManager.isBlocked(host)) {
+            throw new IllegalArgumentException("The provided URL is blocked or belongs to this system.");
+        }
+
         LocalDateTime expireAt = calculateExpiration(request);
 
         // check if longUrl already exists
